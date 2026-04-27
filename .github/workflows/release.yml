@@ -1,0 +1,61 @@
+name: 'AVD Onboarding Accelerator CD'
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/**'
+      - 'backend/**'
+      - '.github/workflows/release.yml'
+
+jobs:
+  validate-and-test:
+    name: 'Workflow & API Validation'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Source
+      uses: actions/checkout@v3
+
+    - name: Run Pytest
+      run: |
+        pip install pytest fastapi httpx
+        pytest tests/
+
+  build-and-push:
+    name: 'Platform Containerization'
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+    steps:
+    - name: Azure CLI Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Build & Push Onboarding API
+      run: |
+        az acr login --name acronboard
+        docker build -t acronboard.azurecr.io/devopstrio/onboarding-api:${{ github.sha }} ./backend
+        docker push acronboard.azurecr.io/devopstrio/onboarding-api:${{ github.sha }}
+
+    - name: Build & Push Workflow Engine
+      run: |
+        docker build -t acronboard.azurecr.io/devopstrio/workflow-engine:${{ github.sha }} ./apps/workflow-engine
+        docker push acronboard.azurecr.io/devopstrio/workflow-engine:${{ github.sha }}
+
+  aks-rollout:
+    name: 'Platform Deployment'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+    - name: AKS Set Context
+      uses: azure/aks-set-context@v3
+      with:
+        resource-group: 'rg-avd-onboarding-prd'
+        cluster-name: 'aks-avd-onboarding-prd'
+
+    - name: Helm Upgrade
+      run: |
+        helm upgrade --install avd-onboarding ./helm/avd-onboarding-accelerator \
+        --namespace avd-onboard-prod --create-namespace \
+        --set api.image.tag=${{ github.sha }}

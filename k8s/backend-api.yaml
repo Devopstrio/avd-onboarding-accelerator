@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onboarding-api
+  namespace: avd-onboard-prod
+  labels:
+    app: onboarding-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: onboarding-api
+  template:
+    metadata:
+      labels:
+        app: onboarding-api
+    spec:
+      containers:
+      - name: gateway
+        image: acronboard.azurecr.io/devopstrio/onboarding-api:v1.0.0
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: onboarding-secrets
+              key: db-url
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: onboarding-api-svc
+  namespace: avd-onboard-prod
+spec:
+  selector:
+    app: onboarding-api
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8000
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workflow-engine
+  namespace: avd-onboard-prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: workflow-engine
+  template:
+    metadata:
+      labels:
+        component: workflow-engine
+    spec:
+      containers:
+      - name: worker
+        image: acronboard.azurecr.io/devopstrio/workflow-engine:latest
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: onboarding-ingress
+  namespace: avd-onboard-prod
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: onboard.devopstrio.co.uk
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: onboarding-api-svc
+            port:
+              number: 80
